@@ -12,7 +12,7 @@ import {
   StartExecutionCommand,
   StopExecutionCommand,
 } from "@aws-sdk/client-sfn";
-
+import cors from '@middy/http-cors';
 import { Metrics } from "@aws-lambda-powertools/metrics";
 import { Logger, injectLambdaContext } from "@aws-lambda-powertools/logger";
 import { Tracer, captureLambdaHandler } from "@aws-lambda-powertools/tracer";
@@ -838,4 +838,5 @@ export const handler = middy()
   .use(httpErrorHandler())
   .use(captureLambdaHandler(tracer))
   .use(injectLambdaContext(logger))
+  .use(cors())
   .handler(httpRouterHandler(routes));

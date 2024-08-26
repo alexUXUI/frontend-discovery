@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Frontend Service Discovery on AWS (uksb-1tthgi8k7) (version:v1.3)
+Description: Frontend Service Discovery on AWS (uksb-1tthgi8k7) (version:v)
 
 Globals:
   Function:
-    Runtime: nodejs16.x
+    Runtime: nodejs20.x
     Architectures:
       - arm64
     Tracing: Active
@@ -71,6 +71,92 @@ Mappings:
       Version: '1.3'
 
 Resources:
+  StaticSiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "*"
+            AllowedMethods:
+              - GET
+            AllowedHeaders:
+              - "*"
+            MaxAge: 3000
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  StaticSiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StaticSiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "${StaticSiteBucket.Arn}/*"
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+            Action: "s3:GetObject"
+            Resource: !Sub "${StaticSiteBucket.Arn}/*"
+
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: "Access Identity for Static Site"
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt StaticSiteBucket.DomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        Enabled: true
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+          MinTTL: 0
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        DefaultRootObject: index.html
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+          - ErrorCode: 403
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+
   ProjectStore:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -193,7 +279,11 @@ Resources:
     Properties:
       Name: Frontend Service Discovery Consumer API
       StageName: !Ref Stage
-      Cors: !Sub "'${AccessControlAllowOrigin}'"
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
       TracingEnabled: true
 
   StreamHandler:
@@ -337,6 +427,11 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
       TracingEnabled: true
       Name: Frontend Service Discovery Admin API
       Auth:
@@ -501,6 +596,18 @@ Resources:
       RoleArn: !GetAtt StateMachineRole.Arn
 
 Outputs:
+  StaticSiteBucketName:
+    Description: "Name of the S3 bucket for static site hosting"
+    Value: !Ref StaticSiteBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-StaticSiteBucketName"
+
+  CloudFrontDistributionDomainName:
+    Description: "Domain name of the CloudFront distribution"
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFrontDistributionDomainName"
+
   ConsumerApi:
     Description: "Consumer Api API Gateway endpoint URL"
     Value: !Sub "https://${ConsumerApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
